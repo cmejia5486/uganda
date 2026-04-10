@@ -8,7 +8,7 @@ env:
 
 jobs:
   sast:
-    name: SAST no build security-only report-only
+    name: SAST Kotlin Java manual build security-only report-only
     if: ${{ github.actor != 'dependabot[bot]' && !startsWith(github.head_ref || github.ref_name || '', 'dependabot/') && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') }}
     runs-on: ubuntu-latest
     permissions:
@@ -18,14 +18,31 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 for Gradle and CodeQL
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: java
-          build-mode: none
+          languages: java-kotlin
+          build-mode: manual
           config-file: .github/codeql/codeql-security.yml
+
+      - name: Build project for CodeQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew clean assembleDebug --no-daemon --stacktrace
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
@@ -34,11 +51,11 @@ jobs:
           upload: false
         continue-on-error: true
 
-      - name: Set up JDK for Detekt CLI
-        uses: actions/setup-java@v5
+      - name: Set up JDK 17 for Detekt CLI
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '11'
+          java-version: '17'
 
       - name: Download detekt CLI
         shell: bash
@@ -55,7 +72,7 @@ jobs:
           java -jar tools/detekt-cli.jar -i . --all-rules --report sarif:report/detekt.sarif || true
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
@@ -74,8 +91,10 @@ jobs:
             --config p/owasp-top-ten \
             --config p/security-audit \
             --config p/secrets \
-            --severity WARNING --severity ERROR \
-            --sarif --output report/semgrep.raw.sarif || true
+            --severity WARNING \
+            --severity ERROR \
+            --sarif \
+            --output report/semgrep.raw.sarif || true
 
       - name: Filter Semgrep SARIF keep app code only
         uses: advanced-security/filter-sarif@v1
@@ -111,7 +130,7 @@ jobs:
 
       - name: Upload findings artifact para otros jobs IA
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: sast-findings
           path: |
