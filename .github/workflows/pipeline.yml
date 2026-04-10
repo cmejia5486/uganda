@@ -89,9 +89,19 @@ jobs:
     secrets: inherit
 
   # 3) Runs Mobile Security Framework (MobSF) scan and uploads MobSF JSON reports (trusted only)
+ # mobsf:
+  #  needs: [gate, codeql_analysis]
+   # if: ${{ needs.gate.outputs.run_phase2 == 'true' }}
+    #uses: ./.github/workflows/mobsf.yml
+    #secrets: inherit
+    
   mobsf:
-    needs: [gate]
-    if: ${{ needs.gate.outputs.run_phase2 == 'true' }}
+    needs: [gate, codeql_analysis]
+    if: >-
+        ${{
+        needs.gate.outputs.run_phase2 == 'true' &&
+        needs.codeql_analysis.result == 'success'
+        }}
     uses: ./.github/workflows/mobsf.yml
     secrets: inherit
 
