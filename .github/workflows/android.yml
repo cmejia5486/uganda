@@ -152,7 +152,7 @@ jobs:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.auto_tag.outputs.tag }}
           name: Release ${{ steps.auto_tag.outputs.tag }}
