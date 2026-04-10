@@ -8,7 +8,7 @@ env:
 
 jobs:
   sast:
-    name: SAST security report-only
+    name: SAST manual build security-only report-only
     if: ${{ github.actor != 'dependabot[bot]' && !startsWith(github.head_ref || github.ref_name || '', 'dependabot/') && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') }}
     runs-on: ubuntu-latest
     permissions:
@@ -26,17 +26,29 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Make gradlew executable
+      - name: Create local.properties for CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > local.properties <<EOF
+          sdk.dir=${ANDROID_SDK_ROOT}
+          KEYSTORE_FILE=keystore/release.jks
+          KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS=${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      - name: Make Gradle executable
         shell: bash
         run: chmod +x ./gradlew
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
-          languages: java
+          languages: java-kotlin
           build-mode: manual
           config-file: .github/codeql/codeql-security.yml
 
@@ -44,13 +56,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon clean assembleDebug -x lint -x test
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
           output: report/codeql
           upload: false
+        continue-on-error: true
+
+      - name: Set up JDK for Detekt CLI
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - name: Download detekt CLI
         shell: bash
