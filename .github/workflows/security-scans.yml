@@ -17,23 +17,45 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Generate Gradle lockfile (no build)
-        if: ${{ hashFiles('**/gradle.lockfile') == '' }}
+      - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '11'
+          java-version: '17'
+          cache: gradle
 
-      - name: Write Gradle dependency locks
-        if: ${{ hashFiles('**/gradle.lockfile') == '' }}
-        continue-on-error: true
+      - name: Create temporary local.properties for CI
+        shell: bash
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x gradlew
-            ./gradlew dependencies --write-locks
+          set -euo pipefail
+
+          if [ ! -f local.properties ]; then
+            {
+              if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+                echo "sdk.dir=${ANDROID_SDK_ROOT}"
+              elif [ -n "${ANDROID_HOME:-}" ]; then
+                echo "sdk.dir=${ANDROID_HOME}"
+              fi
+
+              echo "KEYSTORE_FILE=${{ secrets.KEYSTORE_FILE }}"
+              echo "KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}"
+              echo "KEY_ALIAS=${{ secrets.KEY_ALIAS }}"
+              echo "KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}"
+            } > local.properties
           fi
 
-      - name: Install Trivy (apt)
+      - name: Generate Gradle lockfile
+        if: ${{ hashFiles('**/gradle.lockfile') == '' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew dependencies --write-locks --no-daemon
+          fi
+
+      - name: Install Trivy
         shell: bash
         run: |
           set -euo pipefail
@@ -75,16 +97,22 @@ jobs:
         id: meta
         shell: bash
         run: |
+          set -euo pipefail
           echo "run_url=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
           trivy_version=$(trivy --version 2>/dev/null | head -n1 | awk '{print $2}')
           echo "trivy_version=${trivy_version:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Ensure jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
 
       - name: Build AI payload (agent_payload.json)
         shell: bash
         run: |
+          set -euo pipefail
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           jq -n \
             --arg repo "${{ github.repository }}" \
@@ -108,21 +136,25 @@ jobs:
                          pkg: .PkgName,
                          installed: .InstalledVersion,
                          fixed: (.FixedVersion // null),
-                         fix_available: ( has("FixedVersion") and (.FixedVersion != null) and (.FixedVersion != "") ),
+                         fix_available: (has("FixedVersion") and (.FixedVersion != null) and (.FixedVersion != "")),
                          severity: .Severity,
                          severity_source: .SeveritySource,
                          vendor_severity: (.VendorSeverity // {}),
                          cvss: ((.CVSS // {}) | to_entries
-                                | map({source: .key,
-                                       v2: (.value.V2Score // null),
-                                       v2_vector: (.value.V2Vector // null),
-                                       v3: (.value.V3Score // null),
-                                       v3_vector: (.value.V3Vector // null)})),
+                                | map({
+                                    source: .key,
+                                    v2: (.value.V2Score // null),
+                                    v2_vector: (.value.V2Vector // null),
+                                    v3: (.value.V3Score // null),
+                                    v3_vector: (.value.V3Vector // null)
+                                  })),
                          best_cvss:
                            (((.CVSS // {}) | to_entries
-                             | map({source: .key,
-                                    v3: (.value.V3Score // 0),
-                                    v3_vector: (.value.V3Vector // null)})
+                             | map({
+                                 source: .key,
+                                 v3: (.value.V3Score // 0),
+                                 v3_vector: (.value.V3Vector // null)
+                               })
                              | sort_by(-.v3) | .[0]) // {}),
                          cwe: (.CWEIDs // []),
                          title: .Title,
@@ -133,7 +165,7 @@ jobs:
                          data_source: (.DataSource // {})
                        })
                    )
-                 | add // [] );
+                 | add // []);
              def sev_init: {"CRITICAL":0,"HIGH":0,"MEDIUM":0,"LOW":0,"UNKNOWN":0};
              def summarize($f):
                {
@@ -153,8 +185,20 @@ jobs:
              (to_findings) as $F
              |
              {
-               meta: { repo: $repo, sha: $sha, ref: $ref, run_id: $run_id, run_url: $run_url, generated_at: $ts },
-               scan: { tool: "trivy", tool_version: $trivy_version, mode: "fs", schema: "custom:v2" },
+               meta: {
+                 repo: $repo,
+                 sha: $sha,
+                 ref: $ref,
+                 run_id: $run_id,
+                 run_url: $run_url,
+                 generated_at: $ts
+               },
+               scan: {
+                 tool: "trivy",
+                 tool_version: $trivy_version,
+                 mode: "fs",
+                 schema: "custom:v2"
+               },
                summary: summarize($F),
                findings: $F
              }' > agent_payload.json
@@ -167,4 +211,3 @@ jobs:
             agent_payload.json
             trivy.json
           retention-days: 14
-          
