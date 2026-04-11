@@ -16,109 +16,94 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Build matrix from override or autodetect
         id: plan
-        shell: bash
-        run: |
-          set -euo pipefail
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
 
-          if [ -f ".github/codeql/override.json" ]; then
-            echo "Using override.json"
-            python3 - <<'PY' > matrix.json
-import json
+            const include = [];
 
-with open(".github/codeql/override.json", "r", encoding="utf-8") as f:
-    data = json.load(f)
+            function add(language, build_mode, build_script = '') {
+              const item = { language, build_mode, build_script };
+              const exists = include.some(x => JSON.stringify(x) === JSON.stringify(item));
+              if (!exists) include.push(item);
+            }
 
-print(json.dumps(data))
-PY
-          else
-            echo "Using autodetect"
-            python3 - <<'PY' > matrix.json
-import json
-import os
+            if (fs.existsSync('.github/codeql/override.json')) {
+              const matrix = JSON.parse(fs.readFileSync('.github/codeql/override.json', 'utf8'));
+              core.setOutput('matrix', JSON.stringify(matrix));
+              return;
+            }
 
-include = []
+            const exists = (p) => fs.existsSync(p);
 
-def add(language, build_mode, build_script=""):
-    item = {
-        "language": language,
-        "build_mode": build_mode,
-        "build_script": build_script,
-    }
-    if item not in include:
-        include.append(item)
+            if (exists('.github/workflows')) {
+              add('actions', 'none');
+            }
 
-if os.path.isdir(".github/workflows"):
-    add("actions", "none")
+            const hasGradle =
+              exists('build.gradle') ||
+              exists('build.gradle.kts') ||
+              exists('settings.gradle') ||
+              exists('settings.gradle.kts') ||
+              exists('app/build.gradle') ||
+              exists('app/build.gradle.kts') ||
+              exists('gradlew');
 
-has_gradle = any(os.path.exists(p) for p in [
-    "build.gradle",
-    "build.gradle.kts",
-    "settings.gradle",
-    "settings.gradle.kts",
-    "app/build.gradle",
-    "app/build.gradle.kts",
-    "gradlew",
-])
+            const hasAndroid =
+              hasGradle &&
+              (exists('app/src') || exists('android/app') || exists('AndroidManifest.xml'));
 
-has_android = has_gradle and (
-    os.path.isdir("app/src") or
-    os.path.isdir("android/app") or
-    os.path.isfile("AndroidManifest.xml")
-)
+            const hasFlutter = exists('pubspec.yaml');
 
-has_flutter = os.path.isfile("pubspec.yaml")
+            if (hasAndroid) {
+              add('java-kotlin', 'manual', 'android');
+            } else if (hasGradle) {
+              add('java-kotlin', 'autobuild');
+            }
 
-if has_android:
-    add("java-kotlin", "manual", "android")
-elif has_gradle:
-    add("java-kotlin", "autobuild")
+            if (
+              exists('package.json') ||
+              exists('package-lock.json') ||
+              exists('yarn.lock') ||
+              exists('pnpm-lock.yaml')
+            ) {
+              add('javascript-typescript', 'none');
+            }
 
-if (
-    os.path.isfile("package.json") or
-    os.path.isfile("package-lock.json") or
-    os.path.isfile("yarn.lock") or
-    os.path.isfile("pnpm-lock.yaml")
-):
-    add("javascript-typescript", "none")
+            if (
+              exists('requirements.txt') ||
+              exists('pyproject.toml') ||
+              exists('setup.py')
+            ) {
+              add('python', 'none');
+            }
 
-if (
-    os.path.isfile("requirements.txt") or
-    os.path.isfile("pyproject.toml") or
-    os.path.isfile("setup.py")
-):
-    add("python", "none")
+            if (exists('Gemfile')) {
+              add('ruby', 'none');
+            }
 
-if os.path.isfile("Gemfile"):
-    add("ruby", "none")
+            if (exists('Cargo.toml')) {
+              add('rust', 'none');
+            }
 
-if os.path.isfile("Cargo.toml"):
-    add("rust", "none")
+            if (exists('Package.swift')) {
+              add('swift', 'autobuild');
+            }
 
-if os.path.isfile("Package.swift"):
-    add("swift", "autobuild")
+            if (hasFlutter && !include.some(i => i.language === 'java-kotlin')) {
+              add('actions', 'none');
+            }
 
-if has_flutter and not any(i["language"] == "java-kotlin" for i in include):
-    add("actions", "none")
+            if (include.length === 0) {
+              add('actions', 'none');
+            }
 
-if not include:
-    add("actions", "none")
-
-print(json.dumps({"include": include}))
-PY
-          fi
-
-          echo "Generated matrix:"
-          cat matrix.json
-
-          {
-            echo "matrix<<EOF"
-            cat matrix.json
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+            core.setOutput('matrix', JSON.stringify({ include }));
 
   analyze:
     name: CodeQL ${{ matrix.language }} ${{ matrix.build_mode }}
@@ -137,11 +122,11 @@ PY
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
         if: ${{ matrix.language == 'java-kotlin' }}
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
@@ -149,7 +134,7 @@ PY
 
       - name: Initialize CodeQL with repo config
         if: ${{ hashFiles('.github/codeql/codeql-security.yml') != '' }}
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build_mode }}
@@ -157,7 +142,7 @@ PY
 
       - name: Initialize CodeQL without repo config
         if: ${{ hashFiles('.github/codeql/codeql-security.yml') == '' }}
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build_mode }}
@@ -207,10 +192,10 @@ PY
 
       - name: Autobuild project
         if: ${{ matrix.build_mode == 'autobuild' }}
-        uses: github/codeql-action/autobuild@v4
+        uses: github/codeql-action/autobuild@v3
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v3
         with:
           output: report/codeql
           upload: false
