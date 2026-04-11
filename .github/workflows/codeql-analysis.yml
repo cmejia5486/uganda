@@ -26,90 +26,97 @@ jobs:
 
           if [ -f ".github/codeql/override.json" ]; then
             echo "Using override.json"
-            MATRIX="$(python3 -c "import json; print(json.dumps(json.load(open('.github/codeql/override.json', 'r', encoding='utf-8'))))")"
+            python3 - <<'PY' > matrix.json
+import json
+
+with open(".github/codeql/override.json", "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+print(json.dumps(data))
+PY
           else
             echo "Using autodetect"
-            python3 -c "
+            python3 - <<'PY' > matrix.json
 import json
 import os
 
 include = []
 
-def add(language, build_mode, build_script=''):
+def add(language, build_mode, build_script=""):
     item = {
-        'language': language,
-        'build_mode': build_mode,
-        'build_script': build_script
+        "language": language,
+        "build_mode": build_mode,
+        "build_script": build_script,
     }
     if item not in include:
         include.append(item)
 
-if os.path.isdir('.github/workflows'):
-    add('actions', 'none')
+if os.path.isdir(".github/workflows"):
+    add("actions", "none")
 
 has_gradle = any(os.path.exists(p) for p in [
-    'build.gradle',
-    'build.gradle.kts',
-    'settings.gradle',
-    'settings.gradle.kts',
-    'app/build.gradle',
-    'app/build.gradle.kts',
-    'gradlew'
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "app/build.gradle",
+    "app/build.gradle.kts",
+    "gradlew",
 ])
 
 has_android = has_gradle and (
-    os.path.isdir('app/src') or
-    os.path.isdir('android/app') or
-    os.path.isfile('AndroidManifest.xml')
+    os.path.isdir("app/src") or
+    os.path.isdir("android/app") or
+    os.path.isfile("AndroidManifest.xml")
 )
 
-has_flutter = os.path.isfile('pubspec.yaml')
+has_flutter = os.path.isfile("pubspec.yaml")
 
 if has_android:
-    add('java-kotlin', 'manual', 'android')
+    add("java-kotlin", "manual", "android")
 elif has_gradle:
-    add('java-kotlin', 'autobuild')
+    add("java-kotlin", "autobuild")
 
 if (
-    os.path.isfile('package.json') or
-    os.path.isfile('package-lock.json') or
-    os.path.isfile('yarn.lock') or
-    os.path.isfile('pnpm-lock.yaml')
+    os.path.isfile("package.json") or
+    os.path.isfile("package-lock.json") or
+    os.path.isfile("yarn.lock") or
+    os.path.isfile("pnpm-lock.yaml")
 ):
-    add('javascript-typescript', 'none')
+    add("javascript-typescript", "none")
 
 if (
-    os.path.isfile('requirements.txt') or
-    os.path.isfile('pyproject.toml') or
-    os.path.isfile('setup.py')
+    os.path.isfile("requirements.txt") or
+    os.path.isfile("pyproject.toml") or
+    os.path.isfile("setup.py")
 ):
-    add('python', 'none')
+    add("python", "none")
 
-if os.path.isfile('Gemfile'):
-    add('ruby', 'none')
+if os.path.isfile("Gemfile"):
+    add("ruby", "none")
 
-if os.path.isfile('Cargo.toml'):
-    add('rust', 'none')
+if os.path.isfile("Cargo.toml"):
+    add("rust", "none")
 
-if os.path.isfile('Package.swift'):
-    add('swift', 'autobuild')
+if os.path.isfile("Package.swift"):
+    add("swift", "autobuild")
 
-if has_flutter and not any(i['language'] == 'java-kotlin' for i in include):
-    add('actions', 'none')
+if has_flutter and not any(i["language"] == "java-kotlin" for i in include):
+    add("actions", "none")
 
 if not include:
-    add('actions', 'none')
+    add("actions", "none")
 
-print(json.dumps({'include': include}))
-" > matrix.json
-            MATRIX="$(cat matrix.json)"
+print(json.dumps({"include": include}))
+PY
           fi
 
-          echo "$MATRIX"
+          echo "Generated matrix:"
+          cat matrix.json
 
           {
             echo "matrix<<EOF"
-            echo "$MATRIX"
+            cat matrix.json
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -183,10 +190,10 @@ print(json.dumps({'include': include}))
 
           {
             echo "sdk.dir=$SDK_DIR"
-            if [ -n "${KEYSTORE_FILE:-}" ]; then echo "KEYSTORE_FILE=$KEYSTORE_FILE"; fi
-            if [ -n "${KEYSTORE_PASSWORD:-}" ]; then echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"; fi
-            if [ -n "${KEY_ALIAS:-}" ]; then echo "KEY_ALIAS=$KEY_ALIAS"; fi
-            if [ -n "${KEY_PASSWORD:-}" ]; then echo "KEY_PASSWORD=$KEY_PASSWORD"; fi
+            [ -n "${KEYSTORE_FILE:-}" ] && echo "KEYSTORE_FILE=$KEYSTORE_FILE"
+            [ -n "${KEYSTORE_PASSWORD:-}" ] && echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+            [ -n "${KEY_ALIAS:-}" ] && echo "KEY_ALIAS=$KEY_ALIAS"
+            [ -n "${KEY_PASSWORD:-}" ] && echo "KEY_PASSWORD=$KEY_PASSWORD"
           } > local.properties
 
           chmod +x ./gradlew || true
