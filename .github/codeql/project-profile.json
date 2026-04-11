@@ -1,0 +1,17 @@
+{
+  "force_languages": [
+    "java-kotlin",
+    "actions"
+  ],
+  "overrides": {
+    "java-kotlin": {
+      "build_mode": "manual",
+      "jdk": 17,
+      "android": true,
+      "build_command": "./.github/codeql/android-build.sh :app:assembleDebug"
+    },
+    "actions": {
+      "build_mode": "none"
+    }
+  }
+}
