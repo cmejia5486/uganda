@@ -1,114 +1,36 @@
-name: CodeQL Analysis
+name: Static SAST
 
 on:
   workflow_call:
+    inputs:
+      codeql-language:
+        description: "Lenguaje para CodeQL"
+        required: false
+        type: string
+        default: "java"
+      codeql-build-mode:
+        description: "manual o none"
+        required: false
+        type: string
+        default: "manual"
+      codeql-config-file:
+        description: "Ruta del config de CodeQL"
+        required: false
+        type: string
+        default: ".github/codeql/codeql-security.yml"
+      build-command:
+        description: "Comando de build para CodeQL cuando build-mode=manual"
+        required: false
+        type: string
+        default: "./gradlew assembleDebug --no-daemon -x lint"
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  detect-plan:
-    name: Detect CodeQL plan
+  sast:
+    name: SAST security-only report-only
     if: ${{ github.actor != 'dependabot[bot]' && !startsWith(github.head_ref || github.ref_name || '', 'dependabot/') && (github.event_name != 'pull_request' || github.event.pull_request.user.login != 'dependabot[bot]') }}
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build matrix from override or autodetect
-        id: plan
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-
-            const include = [];
-
-            function add(language, build_mode, build_script = '') {
-              const item = { language, build_mode, build_script };
-              const exists = include.some(x => JSON.stringify(x) === JSON.stringify(item));
-              if (!exists) include.push(item);
-            }
-
-            if (fs.existsSync('.github/codeql/override.json')) {
-              const matrix = JSON.parse(fs.readFileSync('.github/codeql/override.json', 'utf8'));
-              core.setOutput('matrix', JSON.stringify(matrix));
-              return;
-            }
-
-            const exists = (p) => fs.existsSync(p);
-
-            if (exists('.github/workflows')) {
-              add('actions', 'none');
-            }
-
-            const hasGradle =
-              exists('build.gradle') ||
-              exists('build.gradle.kts') ||
-              exists('settings.gradle') ||
-              exists('settings.gradle.kts') ||
-              exists('app/build.gradle') ||
-              exists('app/build.gradle.kts') ||
-              exists('gradlew');
-
-            const hasAndroid =
-              hasGradle &&
-              (exists('app/src') || exists('android/app') || exists('AndroidManifest.xml'));
-
-            const hasFlutter = exists('pubspec.yaml');
-
-            if (hasAndroid) {
-              add('java-kotlin', 'manual', 'android');
-            } else if (hasGradle) {
-              add('java-kotlin', 'autobuild');
-            }
-
-            if (
-              exists('package.json') ||
-              exists('package-lock.json') ||
-              exists('yarn.lock') ||
-              exists('pnpm-lock.yaml')
-            ) {
-              add('javascript-typescript', 'none');
-            }
-
-            if (
-              exists('requirements.txt') ||
-              exists('pyproject.toml') ||
-              exists('setup.py')
-            ) {
-              add('python', 'none');
-            }
-
-            if (exists('Gemfile')) {
-              add('ruby', 'none');
-            }
-
-            if (exists('Cargo.toml')) {
-              add('rust', 'none');
-            }
-
-            if (exists('Package.swift')) {
-              add('swift', 'autobuild');
-            }
-
-            if (hasFlutter && !include.some(i => i.language === 'java-kotlin')) {
-              add('actions', 'none');
-            }
-
-            if (include.length === 0) {
-              add('actions', 'none');
-            }
-
-            core.setOutput('matrix', JSON.stringify({ include }));
-
-  analyze:
-    name: CodeQL ${{ matrix.language }} ${{ matrix.build_mode }}
-    needs: detect-plan
-    if: ${{ needs.detect-plan.result == 'success' }}
     runs-on: ubuntu-latest
 
     permissions:
@@ -116,39 +38,22 @@ jobs:
       contents: read
       security-events: write
 
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.detect-plan.outputs.matrix) }}
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up JDK 17
-        if: ${{ matrix.language == 'java-kotlin' }}
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
+          java-version: "17"
 
-      - name: Initialize CodeQL with repo config
-        if: ${{ hashFiles('.github/codeql/codeql-security.yml') != '' }}
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build_mode }}
-          config-file: .github/codeql/codeql-security.yml
+      - name: Set up Android SDK
+        if: ${{ inputs.codeql-language == 'java' }}
+        uses: android-actions/setup-android@v3
 
-      - name: Initialize CodeQL without repo config
-        if: ${{ hashFiles('.github/codeql/codeql-security.yml') == '' }}
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build_mode }}
-
-      - name: Prepare Android build environment
-        if: ${{ matrix.language == 'java-kotlin' && matrix.build_mode == 'manual' && matrix.build_script == 'android' }}
+      - name: Create temporary local.properties
+        if: ${{ inputs.codeql-language == 'java' }}
         shell: bash
         env:
           KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
@@ -158,52 +63,129 @@ jobs:
         run: |
           set -euo pipefail
 
-          SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          if [ -z "$SDK_DIR" ]; then
-            echo "Android SDK not found in ANDROID_SDK_ROOT or ANDROID_HOME"
+          SDK_PATH="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -z "${SDK_PATH}" ]; then
+            echo "No se encontró ANDROID_SDK_ROOT ni ANDROID_HOME"
             exit 1
           fi
 
-          mkdir -p "$HOME/.gradle"
           {
-            echo "org.gradle.daemon=false"
-            echo "org.gradle.parallel=false"
-            echo "org.gradle.workers.max=2"
-            echo "kotlin.incremental=false"
-            echo "kotlin.compiler.execution.strategy=in-process"
-          } >> "$HOME/.gradle/gradle.properties"
-
-          {
-            echo "sdk.dir=$SDK_DIR"
-            [ -n "${KEYSTORE_FILE:-}" ] && echo "KEYSTORE_FILE=$KEYSTORE_FILE"
-            [ -n "${KEYSTORE_PASSWORD:-}" ] && echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
-            [ -n "${KEY_ALIAS:-}" ] && echo "KEY_ALIAS=$KEY_ALIAS"
-            [ -n "${KEY_PASSWORD:-}" ] && echo "KEY_PASSWORD=$KEY_PASSWORD"
+            echo "sdk.dir=${SDK_PATH}"
+            [ -n "${KEYSTORE_FILE:-}" ] && echo "KEYSTORE_FILE=${KEYSTORE_FILE}"
+            [ -n "${KEYSTORE_PASSWORD:-}" ] && echo "KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD}"
+            [ -n "${KEY_ALIAS:-}" ] && echo "KEY_ALIAS=${KEY_ALIAS}"
+            [ -n "${KEY_PASSWORD:-}" ] && echo "KEY_PASSWORD=${KEY_PASSWORD}"
           } > local.properties
 
-          chmod +x ./gradlew || true
+          echo "local.properties generado temporalmente"
+
+      - name: Make gradlew executable
+        if: ${{ inputs.codeql-build-mode == 'manual' && hashFiles('gradlew') != '' }}
+        shell: bash
+        run: chmod +x ./gradlew
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ inputs.codeql-language }}
+          build-mode: ${{ inputs.codeql-build-mode }}
+          config-file: ${{ inputs.codeql-config-file }}
 
       - name: Build project for CodeQL
-        if: ${{ matrix.language == 'java-kotlin' && matrix.build_mode == 'manual' && matrix.build_script == 'android' }}
+        if: ${{ inputs.codeql-build-mode == 'manual' }}
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon clean assembleDebug -x lint -x test --stacktrace
-
-      - name: Autobuild project
-        if: ${{ matrix.build_mode == 'autobuild' }}
-        uses: github/codeql-action/autobuild@v3
+          ${{ inputs.build-command }}
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           output: report/codeql
           upload: false
+        continue-on-error: true
 
-      - name: Upload CodeQL SARIF artifact
+      - name: Download detekt CLI
+        if: ${{ inputs.codeql-language == 'java' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          curl -L -o tools/detekt-cli.jar https://github.com/detekt/detekt/releases/download/v1.23.8/detekt-cli-1.23.8-all.jar
+
+      - name: Run detekt to SARIF
+        if: ${{ inputs.codeql-language == 'java' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          java -jar tools/detekt-cli.jar -i . --all-rules --report sarif:report/detekt.sarif || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Install Semgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          pip install --upgrade semgrep
+
+      - name: Run Semgrep to SARIF
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          semgrep scan \
+            --config p/owasp-top-ten \
+            --config p/security-audit \
+            --config p/secrets \
+            --severity WARNING \
+            --severity ERROR \
+            --sarif \
+            --output report/semgrep.raw.sarif || true
+
+      - name: Filter Semgrep SARIF keep app code only
+        uses: advanced-security/filter-sarif@v1
+        with:
+          input: report/semgrep.raw.sarif
+          output: report/semgrep.sarif
+          patterns: |
+            -**/test/**
+            -**/androidTest/**
+            -**/*Test*.kt
+            -**/*Test*.java
+            **/src/**
+
+      - name: Ensure jq
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Merge SARIFs CodeQL Detekt Semgrep
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p report
+
+          files=(report/codeql/*.sarif report/detekt.sarif report/semgrep.sarif)
+
+          if [ ${#files[@]} -gt 0 ]; then
+            jq -s '{ "version":"2.1.0", "runs": (map(.runs) | add) }' "${files[@]}" > report/merged.sarif
+          else
+            echo '{ "version":"2.1.0", "runs": [] }' > report/merged.sarif
+          fi
+
+      - name: Upload findings artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: codeql-${{ matrix.language }}
-          path: report/codeql/*.sarif
+          name: sast-findings
+          path: |
+            report/*.sarif
+            report/codeql/*.sarif
           if-no-files-found: warn

@@ -1,16 +1,29 @@
-name: codeql-base
-
-disable-default-queries: false
+name: "Generic app security config"
 
 queries:
-  - uses: security-and-quality
+  - uses: security-extended
 
 paths-ignore:
-  - '**/build/**'
-  - '**/.gradle/**'
-  - '**/node_modules/**'
-  - '**/.dart_tool/**'
-  - '**/ios/Pods/**'
-  - '**/vendor/**'
-  - '**/test/**'
-  - '**/androidTest/**'
+  - "**/.git/**"
+  - "**/.github/**"
+  - "**/.gradle/**"
+  - "**/.idea/**"
+  - "**/.dart_tool/**"
+  - "**/.scannerwork/**"
+  - "**/build/**"
+  - "**/dist/**"
+  - "**/out/**"
+  - "**/target/**"
+  - "**/bin/**"
+  - "**/obj/**"
+  - "**/coverage/**"
+  - "**/node_modules/**"
+  - "**/Pods/**"
+  - "**/vendor/**"
+  - "**/tmp/**"
+  - "**/temp/**"
+  - "**/generated/**"
+  - "**/gen/**"
+  - "**/docs/**"
+  - "**/samples/**"
+  - "**/examples/**"

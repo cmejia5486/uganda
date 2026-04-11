@@ -76,7 +76,7 @@ jobs:
 
   # 1) Runs CodeQL analysis (static code scanning) and uploads security findings
   codeql_analysis:
-    needs: [gate]
+    needs: gate
     if: ${{ needs.gate.outputs.run_phase1 == 'true' }}
     uses: ./.github/workflows/codeql-analysis.yml
     secrets: inherit
