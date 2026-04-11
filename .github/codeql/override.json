@@ -1,0 +1,14 @@
+{
+  "include": [
+    {
+      "language": "java-kotlin",
+      "build_mode": "manual",
+      "build_script": "android"
+    },
+    {
+      "language": "actions",
+      "build_mode": "none",
+      "build_script": ""
+    }
+  ]
+}

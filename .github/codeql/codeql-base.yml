@@ -1,0 +1,16 @@
+name: codeql-base
+
+disable-default-queries: false
+
+queries:
+  - uses: security-and-quality
+
+paths-ignore:
+  - '**/build/**'
+  - '**/.gradle/**'
+  - '**/node_modules/**'
+  - '**/.dart_tool/**'
+  - '**/ios/Pods/**'
+  - '**/vendor/**'
+  - '**/test/**'
+  - '**/androidTest/**'

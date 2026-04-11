@@ -1,29 +1,45 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TASK="${1:-:app:assembleDebug}"
-SDK_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+echo "== Android build helper for CodeQL =="
 
-if [ ! -d "$SDK_DIR" ]; then
-  echo "Android SDK not found. Checked: $SDK_DIR" >&2
-  exit 1
+mkdir -p keystore
+
+if [ -n "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+  echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > keystore/release.jks
 fi
 
-cat > local.properties <<EOF
-sdk.dir=${SDK_DIR}
-KEYSTORE_FILE=${KEYSTORE_FILE:-keystore/release.jks}
-KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD:-}
-KEY_ALIAS=${KEY_ALIAS:-}
-KEY_PASSWORD=${KEY_PASSWORD:-}
-EOF
+if [ ! -f local.properties ]; then
+  {
+    if [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+      echo "sdk.dir=${ANDROID_SDK_ROOT}"
+    elif [ -n "${ANDROID_HOME:-}" ]; then
+      echo "sdk.dir=${ANDROID_HOME}"
+    fi
 
-if [ -n "${KEYSTORE_BASE64:-}" ]; then
-  KEYSTORE_PATH="${KEYSTORE_FILE:-keystore/release.jks}"
-  mkdir -p "$(dirname "$KEYSTORE_PATH")"
-  printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+    [ -n "${KEYSTORE_FILE:-}" ] && echo "KEYSTORE_FILE=${KEYSTORE_FILE}"
+    [ -n "${KEYSTORE_PASSWORD:-}" ] && echo "KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD}"
+    [ -n "${KEY_ALIAS:-}" ] && echo "KEY_ALIAS=${KEY_ALIAS}"
+    [ -n "${KEY_PASSWORD:-}" ] && echo "KEY_PASSWORD=${KEY_PASSWORD}"
+  } > local.properties
 fi
 
 chmod +x ./gradlew
 
 ./gradlew --stop || true
-./gradlew --no-daemon "${TASK}"
+./gradlew clean --no-daemon
+
+if ./gradlew tasks --all | grep -q "assembleDebug"; then
+  ./gradlew :app:assembleDebug \
+    --no-daemon \
+    --stacktrace \
+    -Dkotlin.incremental=false
+elif ./gradlew tasks --all | grep -q "assemble"; then
+  ./gradlew assemble \
+    --no-daemon \
+    --stacktrace \
+    -Dkotlin.incremental=false
+else
+  echo "No Gradle build task found"
+  exit 1
+fi
