@@ -25,74 +25,70 @@ jobs:
 
           if [ -f ".github/codeql/override.json" ]; then
             echo "Using override.json"
-            MATRIX="$(python3 - <<'PY'
-import json
-with open('.github/codeql/override.json', 'r', encoding='utf-8') as f:
-    data = json.load(f)
-print(json.dumps(data))
-PY
-)"
+            MATRIX="$(
+              python3 - <<'PY'
+              import json
+              with open('.github/codeql/override.json', 'r', encoding='utf-8') as f:
+                  data = json.load(f)
+              print(json.dumps(data))
+              PY
+            )"
           else
             echo "Using autodetect"
             python3 - <<'PY' > matrix.json
-import json
-import os
+            import json
+            import os
 
-include = []
+            include = []
 
-def add(language, build_mode, build_script=""):
-    item = {
-        "language": language,
-        "build_mode": build_mode,
-        "build_script": build_script
-    }
-    if item not in include:
-        include.append(item)
+            def add(language, build_mode, build_script=""):
+                item = {
+                    "language": language,
+                    "build_mode": build_mode,
+                    "build_script": build_script
+                }
+                if item not in include:
+                    include.append(item)
 
-if os.path.isdir(".github/workflows"):
-    add("actions", "none")
+            if os.path.isdir(".github/workflows"):
+                add("actions", "none")
 
-has_gradle = any(os.path.exists(p) for p in [
-    "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
-    "app/build.gradle", "app/build.gradle.kts"
-])
-has_android = has_gradle and (
-    os.path.exists("app/src") or
-    os.path.exists("android/app") or
-    os.path.exists("gradlew")
-)
-has_flutter = os.path.exists("pubspec.yaml")
+            has_gradle = any(os.path.exists(p) for p in [
+                "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts",
+                "app/build.gradle", "app/build.gradle.kts"
+            ])
 
-if has_android:
-    add("java-kotlin", "manual", "android")
-elif has_gradle:
-    add("java-kotlin", "autobuild")
+            has_android = has_gradle and (
+                os.path.exists("app/src") or
+                os.path.exists("android/app") or
+                os.path.exists("gradlew")
+            )
 
-if os.path.exists("package.json") or os.path.exists("yarn.lock") or os.path.exists("pnpm-lock.yaml"):
-    add("javascript-typescript", "none")
+            if has_android:
+                add("java-kotlin", "manual", "android")
+            elif has_gradle:
+                add("java-kotlin", "autobuild")
 
-if os.path.exists("requirements.txt") or os.path.exists("pyproject.toml"):
-    add("python", "none")
+            if os.path.exists("package.json") or os.path.exists("yarn.lock") or os.path.exists("pnpm-lock.yaml"):
+                add("javascript-typescript", "none")
 
-if os.path.exists("Gemfile"):
-    add("ruby", "none")
+            if os.path.exists("requirements.txt") or os.path.exists("pyproject.toml"):
+                add("python", "none")
 
-if os.path.exists("Cargo.toml"):
-    add("rust", "none")
+            if os.path.exists("Gemfile"):
+                add("ruby", "none")
 
-if os.path.exists("Package.swift") or os.path.isdir("*.xcodeproj"):
-    add("swift", "autobuild")
+            if os.path.exists("Cargo.toml"):
+                add("rust", "none")
 
-# Flutter note:
-# CodeQL does not analyze Dart directly.
-# If pubspec.yaml exists together with android/ios/web, the supported parts are
-# still covered by the rules above.
+            if os.path.exists("Package.swift"):
+                add("swift", "autobuild")
 
-if not include:
-    add("actions", "none")
+            if not include:
+                add("actions", "none")
 
-print(json.dumps({"include": include}))
-PY
+            print(json.dumps({"include": include}))
+            PY
             MATRIX="$(cat matrix.json)"
           fi
 
