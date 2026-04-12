@@ -16,22 +16,17 @@ fun getVersionCode(): Int {
     exec {
         commandLine("git", "rev-list", "--count", "HEAD")
         standardOutput = stdout
-        isIgnoreExitValue = true
     }
     return stdout.toString().trim().toIntOrNull() ?: 1
 }
 
 fun getVersionName(): String {
     val stdout = ByteArrayOutputStream()
-    val stderr = ByteArrayOutputStream()
-
     exec {
         commandLine("git", "describe", "--tags", "--abbrev=0")
         standardOutput = stdout
-        errorOutput = stderr
         isIgnoreExitValue = true
     }
-
     val tag = stdout.toString().trim()
     return tag.ifEmpty { "0.1.0" }
 }
@@ -70,25 +65,15 @@ val hasReleaseSigning =
     !keyAliasName.isNullOrBlank() &&
     !keyPasswordValue.isNullOrBlank()
 
-val enableAbiSplits =
-    providers.gradleProperty("enableAbiSplits")
-        .map { it.toBoolean() }
-        .orElse(true)
-        .get()
-
 android {
     namespace = "com.lyecdevelopers.ugandaemrmobile"
     compileSdk = 36
 
     splits {
         abi {
-            isEnable = enableAbiSplits
+            isEnable = true
             reset()
-
-            if (enableAbiSplits) {
-                include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-            }
-
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
             isUniversalApk = false
         }
     }

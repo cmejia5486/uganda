@@ -70,7 +70,7 @@ jobs:
           "apk_path=$($apkFile.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "apk_name=$($apkFile.Name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Upload app to MobSF and collect static report
+      - name: Upload app to MobSF and run static scan
         id: static_scan
         shell: powershell
         run: |
@@ -92,9 +92,45 @@ jobs:
             exit 1
           }
 
-          $maxAttempts = 12
+          $maxAttempts = 6
           $retryDelaySeconds = 15
-          $scanRequestTimeoutSeconds = 30
+
+          Write-Host "Uploading APK to MobSF from: $apkPath"
+          $uploadResult = curl.exe -sS -X POST "$baseUrl/api/v1/upload" `
+            -H "Authorization: $apiKey" `
+            -F "file=@$apkPath"
+
+          if ([string]::IsNullOrWhiteSpace($uploadResult)) {
+            Write-Error 'MobSF upload returned an empty response.'
+            exit 1
+          }
+
+          $uploadResult | Set-Content mobsf_upload_response.json
+          $uploadResponse = Get-Content mobsf_upload_response.json -Raw | ConvertFrom-Json
+
+          $hash = "$($uploadResponse.hash)".Trim()
+          if ([string]::IsNullOrWhiteSpace($hash)) {
+            Write-Error 'No hash returned from MobSF upload.'
+            exit 1
+          }
+
+          Write-Host "MobSF upload hash: $hash"
+          "hash=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          try {
+            $scanResponse = Invoke-RestMethod -Uri "$baseUrl/api/v1/scan" `
+              -Method Post `
+              -TimeoutSec 3600 `
+              -Headers @{ Authorization = $apiKey } `
+              -Body @{ hash = $hash }
+
+            if ($null -ne $scanResponse) {
+              $scanResponse | ConvertTo-Json -Depth 100 | Set-Content mobsf_scan_response.json
+            }
+          } catch {
+            Write-Error "MobSF scan request failed: $($_.Exception.Message)"
+            exit 1
+          }
 
           function Test-MobsfReportReady {
             param(
@@ -128,97 +164,17 @@ jobs:
             return $true
           }
 
-          function Get-MobsfStaticReport {
-            param(
-              [Parameter(Mandatory = $true)]
-              [string] $Url,
-              [Parameter(Mandatory = $true)]
-              [string] $Token,
-              [Parameter(Mandatory = $true)]
-              [string] $Hash
-            )
-
-            try {
-              return Invoke-RestMethod -Uri "$Url/api/v1/report_json" `
-                -Method Post `
-                -TimeoutSec 60 `
-                -Headers @{ Authorization = $Token } `
-                -Body @{ hash = $Hash }
-            } catch {
-              $message = $_.Exception.Message
-              Write-Host "report_json request failed: $message"
-              Set-Content -Path mobsf_report_last_error.txt -Value $message
-              return $null
-            }
-          }
-
-          Write-Host "Uploading APK to MobSF from: $apkPath"
-          $uploadResult = curl.exe -sS -X POST "$baseUrl/api/v1/upload" `
-            -H "Authorization: $apiKey" `
-            -F "file=@$apkPath"
-
-          if ([string]::IsNullOrWhiteSpace($uploadResult)) {
-            Write-Error 'MobSF upload returned an empty response.'
-            exit 1
-          }
-
-          $uploadResult | Set-Content mobsf_upload_response.json
-          $uploadResponse = Get-Content mobsf_upload_response.json -Raw | ConvertFrom-Json
-
-          $hash = "$($uploadResponse.hash)".Trim()
-          if ([string]::IsNullOrWhiteSpace($hash)) {
-            Write-Error 'No hash returned from MobSF upload.'
-            exit 1
-          }
-
-          Write-Host "MobSF upload hash: $hash"
-          "hash=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
           $reportReady = $false
 
-          Write-Host 'Checking whether MobSF already has a static report for this hash'
-          $existingReport = Get-MobsfStaticReport -Url $baseUrl -Token $apiKey -Hash $hash
-
-          if ($null -ne $existingReport) {
-            $existingReport | ConvertTo-Json -Depth 100 | Set-Content mobsf_report_initial_response.json
-          }
-
-          if (Test-MobsfReportReady -ReportObject $existingReport) {
-            $existingReport | ConvertTo-Json -Depth 100 | Set-Content mobsf_results.json
-            $reportReady = $true
-            Write-Host 'MobSF static report already existed. Reusing cached report.'
-          }
-
-          if (-not $reportReady) {
-            Write-Host 'No ready report found. Triggering MobSF scan.'
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            Write-Host "Polling MobSF static report, attempt $attempt of $maxAttempts"
 
             try {
-              $scanResponse = Invoke-RestMethod -Uri "$baseUrl/api/v1/scan" `
+              $report = Invoke-RestMethod -Uri "$baseUrl/api/v1/report_json" `
                 -Method Post `
-                -TimeoutSec $scanRequestTimeoutSeconds `
+                -TimeoutSec 120 `
                 -Headers @{ Authorization = $apiKey } `
                 -Body @{ hash = $hash }
-
-              if ($null -ne $scanResponse) {
-                $scanResponse | ConvertTo-Json -Depth 100 | Set-Content mobsf_scan_response.json
-              }
-
-              Write-Host 'MobSF scan request returned successfully.'
-            } catch {
-              $message = $_.Exception.Message
-              Write-Host "MobSF scan request did not return quickly: $message"
-              Set-Content -Path mobsf_scan_last_error.txt -Value $message
-              Write-Host 'Continuing to poll report_json in case the scan is running server-side.'
-            }
-
-            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-              Write-Host "Polling MobSF static report, attempt $attempt of $maxAttempts"
-
-              $report = Get-MobsfStaticReport -Url $baseUrl -Token $apiKey -Hash $hash
-
-              if ($null -ne $report) {
-                $report | ConvertTo-Json -Depth 100 | Set-Content mobsf_report_last_response.json
-              }
 
               if (Test-MobsfReportReady -ReportObject $report) {
                 $report | ConvertTo-Json -Depth 100 | Set-Content mobsf_results.json
@@ -227,9 +183,17 @@ jobs:
                 break
               }
 
-              if ($attempt -lt $maxAttempts) {
-                Start-Sleep -Seconds $retryDelaySeconds
+              if ($null -ne $report) {
+                $report | ConvertTo-Json -Depth 100 | Set-Content mobsf_report_last_response.json
               }
+            } catch {
+              $message = $_.Exception.Message
+              Write-Host "Static report not ready yet: $message"
+              Set-Content -Path mobsf_report_last_error.txt -Value $message
+            }
+
+            if ($attempt -lt $maxAttempts) {
+              Start-Sleep -Seconds $retryDelaySeconds
             }
           }
 
@@ -264,10 +228,8 @@ jobs:
             mobsf_scan_metadata.json
             mobsf_upload_response.json
             mobsf_scan_response.json
-            mobsf_report_initial_response.json
             mobsf_report_last_response.json
             mobsf_report_last_error.txt
-            mobsf_scan_last_error.txt
           if-no-files-found: warn
 
       - name: Try to download MobSF dynamic JSON report if available
