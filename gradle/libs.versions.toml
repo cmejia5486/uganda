@@ -6,7 +6,7 @@ kotlin = "2.2.0"
 
 ksp = "2.2.0-2.0.2"
 coreKtx = "1.16.0"
-googleServices = "4.4.3"
+googleServices = "4.4.4"
 crashlytics = "3.0.4"
 
 # Compose
