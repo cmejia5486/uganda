@@ -98,7 +98,7 @@ jobs:
 
           function Test-MobsfReportReady {
             param(
-              [Parameter(Mandatory = $true)]
+              [AllowNull()]
               $ReportObject
             )
 
@@ -183,7 +183,7 @@ jobs:
             $existingReport | ConvertTo-Json -Depth 100 | Set-Content mobsf_report_initial_response.json
           }
 
-          if (Test-MobsfReportReady -ReportObject $existingReport) {
+          if ($null -ne $existingReport -and (Test-MobsfReportReady -ReportObject $existingReport)) {
             $existingReport | ConvertTo-Json -Depth 100 | Set-Content mobsf_results.json
             $reportReady = $true
             Write-Host 'MobSF static report already existed. Reusing cached report.'
@@ -220,7 +220,7 @@ jobs:
                 $report | ConvertTo-Json -Depth 100 | Set-Content mobsf_report_last_response.json
               }
 
-              if (Test-MobsfReportReady -ReportObject $report) {
+              if ($null -ne $report -and (Test-MobsfReportReady -ReportObject $report)) {
                 $report | ConvertTo-Json -Depth 100 | Set-Content mobsf_results.json
                 $reportReady = $true
                 Write-Host 'MobSF static report is ready.'

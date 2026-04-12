@@ -17,12 +17,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Generate Gradle lockfile (no build)
+      - name: Set up JDK for Gradle lockfile
         if: ${{ hashFiles('**/gradle.lockfile') == '' }}
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '11'
+          java-version: ${{ vars.ANDROID_SDK_JAVA_VERSION || '17' }}
+
+      - name: Verify Java
+        if: ${{ hashFiles('**/gradle.lockfile') == '' }}
+        shell: bash
+        run: |
+          echo "ANDROID_SDK_JAVA_VERSION=${{ vars.ANDROID_SDK_JAVA_VERSION }}"
+          java -version
+          echo "JAVA_HOME=$JAVA_HOME"
 
       - name: Write Gradle dependency locks
         if: ${{ hashFiles('**/gradle.lockfile') == '' }}
@@ -166,5 +174,4 @@ jobs:
           path: |
             agent_payload.json
             trivy.json
-          retention-days: 14
-          
+          retention-days: 365
