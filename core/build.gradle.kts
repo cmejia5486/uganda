@@ -8,11 +8,24 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
-val localProperties = Properties().apply {
-    load(project.rootProject.file("local.properties").inputStream())
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.inputStream().use { localProperties.load(it) }
 }
 
-val apiBaseUrl = localProperties["API_BASE_URL"] as String? ?: ""
+fun ciOrLocal(name: String): String? {
+    val envValue = System.getenv(name)
+    if (!envValue.isNullOrBlank()) return envValue
+
+    val localValue = localProperties.getProperty(name)
+    if (!localValue.isNullOrBlank()) return localValue
+
+    return null
+}
+
+val apiBaseUrl = ciOrLocal("API_BASE_URL") ?: ""
 
 android {
     namespace = "com.lyecdevelopers.core"
@@ -29,8 +42,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
 
-
-        // url config
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }
 
@@ -44,20 +55,21 @@ android {
         }
     }
 
-
     composeOptions {
         kotlinCompilerExtensionVersion = "2.0.20"
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
-
     }
 
-    packaging { resources.excludes.addAll(listOf("META-INF/ASL-2.0.txt", "META-INF/LGPL-3.0.txt")) }
-
-
+    packaging {
+        resources.excludes.addAll(
+            listOf("META-INF/ASL-2.0.txt", "META-INF/LGPL-3.0.txt")
+        )
+    }
 
     hilt {
         enableAggregatingTask = false
@@ -78,7 +90,6 @@ android {
 }
 
 dependencies {
-    // Compose UI essentials
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -92,53 +103,41 @@ dependencies {
     implementation(libs.androidx.paging.common.android)
     implementation(libs.androidx.appcompat)
 
-    // fhir
     implementation(libs.android.fhir.engine)
     implementation(libs.android.fhir.sdc)
     implementation(libs.androidx.constraintlayout)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 
-    // Hilt
     implementation(libs.hilt.android)
     implementation(libs.androidx.datastore.preferences.core.android)
     ksp(libs.hilt.compiler)
 
-    // Retrofit + OkHttp
     implementation(libs.retrofit)
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)
 
-    // Room
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     implementation(libs.room.paging)
     ksp(libs.room.compiler)
 
-    // Moshi
     implementation(libs.moshi)
     implementation(libs.moshi.kotlin)
     ksp(libs.moshi.kotlin.codegen)
     implementation(libs.moshi.converter)
 
-    // preferences
     implementation(libs.androidx.datastore.preferences)
-
-    // security
     implementation(libs.androidx.security.crypto)
-
-    // logging
     implementation(libs.timber)
 
-    // firebase
-   implementation(platform(libs.firebase.bom))
+    implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.crashlytics)
-    // work
+
     implementation(libs.hilt.work)
     implementation(libs.hilt.work.compiler)
     implementation(libs.work.runtime.ktx)
 
-    // Optional: for previewing Composables
     implementation(libs.androidx.ui.tooling.preview)
     debugImplementation(libs.androidx.ui.tooling)
 }
