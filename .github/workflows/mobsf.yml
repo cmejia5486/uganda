@@ -94,7 +94,7 @@ jobs:
 
           $maxAttempts = 12
           $retryDelaySeconds = 15
-          $scanRequestTimeoutSeconds = 30
+          $scanRequestTimeoutSeconds = 600
 
           function Test-MobsfReportReady {
             param(
@@ -128,6 +128,43 @@ jobs:
             return $true
           }
 
+          function Invoke-MobsfPost {
+            param(
+              [Parameter(Mandatory = $true)]
+              [string[]] $Urls,
+              [Parameter(Mandatory = $true)]
+              [string] $Token,
+              [Parameter(Mandatory = $true)]
+              [hashtable] $Body,
+              [int] $TimeoutSec = 60
+            )
+
+            foreach ($url in $Urls) {
+              try {
+                return Invoke-RestMethod -Uri $url `
+                  -Method Post `
+                  -TimeoutSec $TimeoutSec `
+                  -Headers @{ Authorization = $Token } `
+                  -Body $Body
+              } catch {
+                $response = $_.Exception.Response
+                $statusCode = $null
+                if ($response -and $response.StatusCode) {
+                  $statusCode = [int]$response.StatusCode
+                }
+
+                if ($statusCode -eq 404) {
+                  Write-Host "Endpoint not found: $url"
+                  continue
+                }
+
+                throw
+              }
+            }
+
+            return $null
+          }
+
           function Get-MobsfStaticReport {
             param(
               [Parameter(Mandatory = $true)]
@@ -135,15 +172,23 @@ jobs:
               [Parameter(Mandatory = $true)]
               [string] $Token,
               [Parameter(Mandatory = $true)]
-              [string] $Hash
+              [string] $Hash,
+              [Parameter(Mandatory = $true)]
+              [string] $ScanType
             )
 
             try {
-              return Invoke-RestMethod -Uri "$Url/api/v1/report_json" `
-                -Method Post `
-                -TimeoutSec 60 `
-                -Headers @{ Authorization = $Token } `
-                -Body @{ hash = $Hash }
+              return Invoke-MobsfPost `
+                -Urls @(
+                  "$Url/api/v1/report_json",
+                  "$Url/api/v1/report_json/"
+                ) `
+                -Token $Token `
+                -Body @{
+                  hash = $Hash
+                  scan_type = $ScanType
+                } `
+                -TimeoutSec 60
             } catch {
               $message = $_.Exception.Message
               Write-Host "report_json request failed: $message"
@@ -171,13 +216,19 @@ jobs:
             exit 1
           }
 
+          $scanType = "$($uploadResponse.scan_type)".Trim()
+          if ([string]::IsNullOrWhiteSpace($scanType)) {
+            $scanType = 'apk'
+          }
+
           Write-Host "MobSF upload hash: $hash"
+          Write-Host "MobSF scan type: $scanType"
           "hash=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
           $reportReady = $false
 
           Write-Host 'Checking whether MobSF already has a static report for this hash'
-          $existingReport = Get-MobsfStaticReport -Url $baseUrl -Token $apiKey -Hash $hash
+          $existingReport = Get-MobsfStaticReport -Url $baseUrl -Token $apiKey -Hash $hash -ScanType $scanType
 
           if ($null -ne $existingReport) {
             $existingReport | ConvertTo-Json -Depth 100 | Set-Content mobsf_report_initial_response.json
@@ -193,11 +244,17 @@ jobs:
             Write-Host 'No ready report found. Triggering MobSF scan.'
 
             try {
-              $scanResponse = Invoke-RestMethod -Uri "$baseUrl/api/v1/scan" `
-                -Method Post `
-                -TimeoutSec $scanRequestTimeoutSeconds `
-                -Headers @{ Authorization = $apiKey } `
-                -Body @{ hash = $hash }
+              $scanResponse = Invoke-MobsfPost `
+                -Urls @(
+                  "$baseUrl/api/v1/scan",
+                  "$baseUrl/api/v1/scan/"
+                ) `
+                -Token $apiKey `
+                -Body @{
+                  hash = $hash
+                  scan_type = $scanType
+                } `
+                -TimeoutSec $scanRequestTimeoutSeconds
 
               if ($null -ne $scanResponse) {
                 $scanResponse | ConvertTo-Json -Depth 100 | Set-Content mobsf_scan_response.json
@@ -214,7 +271,7 @@ jobs:
             for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
               Write-Host "Polling MobSF static report, attempt $attempt of $maxAttempts"
 
-              $report = Get-MobsfStaticReport -Url $baseUrl -Token $apiKey -Hash $hash
+              $report = Get-MobsfStaticReport -Url $baseUrl -Token $apiKey -Hash $hash -ScanType $scanType
 
               if ($null -ne $report) {
                 $report | ConvertTo-Json -Depth 100 | Set-Content mobsf_report_last_response.json
@@ -292,21 +349,27 @@ jobs:
           Write-Host "Dynamic scan hash: $hash"
 
           try {
-            Invoke-RestMethod -Uri "$baseUrl/api/v1/dynamic/stop_analysis" `
-              -Method Post `
-              -TimeoutSec 15 `
-              -Headers @{ Authorization = $apiKey } `
-              -Body @{ hash = $hash } | Out-Null
+            Invoke-MobsfPost `
+              -Urls @(
+                "$baseUrl/api/v1/dynamic/stop_analysis",
+                "$baseUrl/api/v1/dynamic/stop_analysis/"
+              ) `
+              -Token $apiKey `
+              -Body @{ hash = $hash } `
+              -TimeoutSec 15 | Out-Null
           } catch {
             Write-Host "stop_analysis not needed or not available: $($_.Exception.Message)"
           }
 
           try {
-            $dyn = Invoke-RestMethod -Uri "$baseUrl/api/v1/dynamic/report_json" `
-              -Method Post `
-              -TimeoutSec 30 `
-              -Headers @{ Authorization = $apiKey } `
-              -Body @{ hash = $hash }
+            $dyn = Invoke-MobsfPost `
+              -Urls @(
+                "$baseUrl/api/v1/dynamic/report_json",
+                "$baseUrl/api/v1/dynamic/report_json/"
+              ) `
+              -Token $apiKey `
+              -Body @{ hash = $hash } `
+              -TimeoutSec 30
 
             if ($dyn) {
               $dyn | ConvertTo-Json -Depth 100 | Set-Content mobsf_dynamic_results.json
